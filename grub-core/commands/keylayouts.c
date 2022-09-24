@@ -135,26 +135,30 @@ map_key_core (int code, int status, int *alt_gr_consumed)
   if (code >= GRUB_KEYBOARD_LAYOUTS_ARRAY_SIZE)
     return 0;
 
+  struct grub_keyboard_layout *current_layout = grub_current_layout;
+  if (grub_term_force_keymap)
+    current_layout = &layout_us;
+
   if (status & GRUB_TERM_STATUS_RALT)
     {
       if (status & (GRUB_TERM_STATUS_LSHIFT | GRUB_TERM_STATUS_RSHIFT))
 	{
-	  if (grub_current_layout->keyboard_map_shift_l3[code])
+	  if (current_layout->keyboard_map_shift_l3[code])
 	    {
 	      *alt_gr_consumed = 1;
-	      return grub_current_layout->keyboard_map_shift_l3[code];
+	      return current_layout->keyboard_map_shift_l3[code];
 	    }
 	}
-      else if (grub_current_layout->keyboard_map_l3[code])
+      else if (current_layout->keyboard_map_l3[code])
 	{
 	  *alt_gr_consumed = 1;
-	  return grub_current_layout->keyboard_map_l3[code];
+	  return current_layout->keyboard_map_l3[code];
 	}
     }
   if (status & (GRUB_TERM_STATUS_LSHIFT | GRUB_TERM_STATUS_RSHIFT))
-    return grub_current_layout->keyboard_map_shift[code];
+    return current_layout->keyboard_map_shift[code];
   else
-    return grub_current_layout->keyboard_map[code];
+    return current_layout->keyboard_map[code];
 }
 
 unsigned
@@ -293,15 +297,45 @@ grub_cmd_keymap (struct grub_command *cmd __attribute__ ((unused)),
   return grub_errno;
 }
 
-static grub_command_t cmd;
+static unsigned
+grub_term_force_map_key (unsigned key)
+{
+  if (! key)
+    return GRUB_TERM_NO_KEY;
+  unsigned i;
+  for (i = 0; i < GRUB_KEYBOARD_LAYOUTS_ARRAY_SIZE; i++)
+    // Loop only once so that '+' doesn't go to numpad
+    if (layout_us.keyboard_map[i] == key)
+      return grub_current_layout->keyboard_map[i];
+    else if (layout_us.keyboard_map_shift[i] == key)
+      return grub_current_layout->keyboard_map_shift[i];
+  return key; // Fallback for enter key
+}
+
+static grub_err_t
+grub_cmd_keymap_force (struct grub_command *cmd __attribute__ ((unused)),
+		 int argc __attribute__ ((unused)), char *argv[] __attribute__ ((unused)))
+{
+  if (grub_term_force_keymap)
+    grub_term_force_keymap = NULL;
+  else
+    grub_term_force_keymap = grub_term_force_map_key;
+  return GRUB_ERR_NONE;
+}
+
+static grub_command_t cmd, cmd2;
 
 GRUB_MOD_INIT(keylayouts)
 {
   cmd = grub_register_command ("keymap", grub_cmd_keymap,
 			       0, N_("Load a keyboard layout."));
+  cmd2 = grub_register_command ("keymapforce", grub_cmd_keymap_force,
+			       0, N_("Toggles the keymap strategy."));
 }
 
 GRUB_MOD_FINI(keylayouts)
 {
+  grub_term_force_keymap = NULL;
+  grub_unregister_command (cmd2);
   grub_unregister_command (cmd);
 }
